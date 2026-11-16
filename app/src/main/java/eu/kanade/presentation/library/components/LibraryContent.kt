@@ -1,6 +1,8 @@
 package eu.kanade.presentation.library.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -28,11 +30,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextOverflow
 import eu.kanade.core.preference.PreferenceMutableState
 import eu.kanade.presentation.library.components.AchievementsContent
 import eu.kanade.tachiyomi.ui.library.LibraryItem
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import tachiyomi.domain.category.model.Category
@@ -44,6 +49,8 @@ import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.LocalCensorEnabled
 import tachiyomi.presentation.core.util.collectAsState
+import kotlin.math.abs
+import kotlin.math.max
 import kotlin.time.Duration.Companion.seconds
 
 @Composable
@@ -89,6 +96,7 @@ fun LibraryContent(
 
             val scope = rememberCoroutineScope()
             var isRefreshing by remember(pagerState.currentPage) { mutableStateOf(false) }
+            var categoryAnimationJob by remember { mutableStateOf<Job?>(null) }
 
             if (showPageTabs && categories.isNotEmpty() && (categories.size > 1 || !categories.first().isSystemCategory)) {
                 LaunchedEffect(categories) {
@@ -109,7 +117,8 @@ fun LibraryContent(
                     pagerState = pagerState,
                     getItemCountForCategory = getItemCountForCategory,
                     onTabItemClick = {
-                        scope.launch {
+                        categoryAnimationJob?.cancel()
+                        categoryAnimationJob = scope.launch {
                             pagerState.animateScrollToPage(it)
                         }
                     },
@@ -167,6 +176,95 @@ fun LibraryContent(
             }
             // KMK <--
 
+            val subcategorySwipeTargets = remember(subcategories, showAllChip, useFolderLayout) {
+                buildList<Long?> {
+                    if (showAllChip || useFolderLayout) add(null)
+                    subcategories.forEach { add(it.id) }
+                }
+            }
+            val swipeEnabled = selection.isEmpty() &&
+                categories.isNotEmpty() &&
+                (categories.size > 1 || subcategorySwipeTargets.size > 1)
+            val swipeModifier = Modifier.pointerInput(
+                categories,
+                activeCategoryIndex,
+                subcategorySwipeTargets,
+                activeSubCategoryId,
+                showAllChip,
+                useFolderLayout,
+                swipeEnabled,
+            ) {
+                if (!swipeEnabled) return@pointerInput
+
+                var requestedPage = pagerState.currentPage.coerceIn(categories.indices)
+                var requestedSubcategoryId = activeSubCategoryId
+
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    var totalX = 0f
+                    var totalY = 0f
+                    var horizontalSwipe = false
+                    var rejected = false
+
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        totalX = change.position.x - down.position.x
+                        totalY = change.position.y - down.position.y
+
+                        if (!change.pressed) break
+
+                        if (!horizontalSwipe && !rejected && abs(totalX) > viewConfiguration.touchSlop) {
+                            if (abs(totalX) > abs(totalY) * 1.5f) {
+                                horizontalSwipe = true
+                            } else if (abs(totalY) > viewConfiguration.touchSlop) {
+                                rejected = true
+                            }
+                        }
+
+                        if (horizontalSwipe) {
+                            if (abs(totalX) > abs(totalY) * 1.5f) {
+                                change.consume()
+                            } else {
+                                horizontalSwipe = false
+                                rejected = true
+                            }
+                        }
+                    }
+
+                    if (!horizontalSwipe || rejected || abs(totalX) <= viewConfiguration.touchSlop) {
+                        return@awaitEachGesture
+                    }
+
+                    val direction = if (totalX < 0f) 1 else -1
+                    val categorySwipeThreshold = max(size.width * 0.25f, viewConfiguration.touchSlop * 2)
+                    if (abs(totalX) >= categorySwipeThreshold) {
+                        val targetPage = (requestedPage + direction).coerceIn(categories.indices)
+                        if (targetPage != requestedPage) {
+                            requestedPage = targetPage
+                            categoryAnimationJob?.cancel()
+                            categoryAnimationJob = scope.launch {
+                                pagerState.animateScrollToPage(targetPage)
+                            }
+                        }
+                    } else {
+                        val currentSubcategoryIndex = subcategorySwipeTargets.indexOf(requestedSubcategoryId)
+                        val baseIndex = if (currentSubcategoryIndex >= 0) {
+                            currentSubcategoryIndex
+                        } else if (direction > 0) {
+                            -1
+                        } else {
+                            0
+                        }
+                        val targetSubcategoryIndex = baseIndex + direction
+                        if (targetSubcategoryIndex in subcategorySwipeTargets.indices) {
+                            requestedSubcategoryId = subcategorySwipeTargets[targetSubcategoryIndex]
+                            onSelectSubcategory(requestedSubcategoryId)
+                        }
+                    }
+                }
+            }
+
             // KMK --> Achievements is a synthetic category (-100) that should render its own
             // scrollable grid instead of the manga pager. Previously LibraryPager was always
             // shown, so the achievements tab rendered an empty LibraryPagerEmptyScreen (cut off
@@ -174,7 +272,7 @@ fun LibraryContent(
             if (currentCategory?.id == eu.kanade.tachiyomi.ui.library.LibraryViewModel.ACHIEVEMENTS_CATEGORY_ID) {
                 AchievementsContent(
                     contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
-                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    modifier = Modifier.fillMaxWidth().weight(1f).then(swipeModifier),
                 )
             } else {
                 PullRefresh(
@@ -202,6 +300,8 @@ fun LibraryContent(
                         getDisplayMode = getDisplayMode,
                         getColumnsForOrientation = getColumnsForOrientation,
                         getItemsForCategory = getItemsForCategory,
+                        userScrollEnabled = false,
+                        modifier = swipeModifier,
                         onClickManga = { category, manga ->
                             if (selection.isNotEmpty()) {
                                 onToggleSelection(category, manga)

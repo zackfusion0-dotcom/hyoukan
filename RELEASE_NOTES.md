@@ -11,5 +11,6 @@ files moved. See .github/scripts/release_notes.py.
 ### New
 
 ### Improve
+- Switch library subcategories with short horizontal swipes and main categories with longer swipes.
 
 ### Fix

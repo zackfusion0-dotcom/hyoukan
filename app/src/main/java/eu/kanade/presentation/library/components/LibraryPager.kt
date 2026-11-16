@@ -49,11 +49,14 @@ fun LibraryPager(
     activeSubCategoryId: Long?,
     getFolderData: (Category) -> Pair<List<Pair<Category, List<LibraryItem>>>, List<LibraryItem>>,
     onSelectSubcategory: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+    userScrollEnabled: Boolean = true,
     // KMK <--
 ) {
     HorizontalPager(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         state = state,
+        userScrollEnabled = userScrollEnabled,
         verticalAlignment = Alignment.Top,
     ) { page ->
         if (page !in ((state.currentPage - 1)..(state.currentPage + 1))) {
