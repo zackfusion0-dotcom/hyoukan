@@ -31,6 +31,12 @@ if (Config.includeTelemetry) {
     }
 }
 
+val apkAbiSplits = if (providers.gradleProperty("custom-apk-arm64-only").orNull == "true") {
+    listOf("arm64-v8a")
+} else {
+    listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+}
+
 android {
     namespace = "eu.kanade.tachiyomi"
 
@@ -142,7 +148,7 @@ android {
             // install uses per-ABI splits; release universal is produced via bundle if needed.
             isUniversalApk = false
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            include(*apkAbiSplits.toTypedArray())
         }
     }
 

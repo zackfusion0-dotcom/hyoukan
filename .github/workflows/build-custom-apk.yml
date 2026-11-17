@@ -59,8 +59,8 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6
 
-      - name: Build debug APKs
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+      - name: Build MTL arm64 debug APK
+        run: ./gradlew assembleMtlDebug -Pcustom-apk-arm64-only=true --no-daemon --stacktrace --max-workers=2
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
