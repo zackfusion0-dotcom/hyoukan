@@ -49,13 +49,16 @@ jobs:
           distribution: temurin
 
       - name: Write google-services.json
+        id: google_services
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           if [ -n "$GOOGLE_SERVICES_JSON" ]; then
             printenv GOOGLE_SERVICES_JSON | base64 -d > app/google-services.json
+            echo "include_telemetry=true" >> "$GITHUB_OUTPUT"
           else
-            echo "GOOGLE_SERVICES_JSON not set; skipping (build will use dummy if needed)"
+            echo "GOOGLE_SERVICES_JSON not set; building without telemetry"
+            echo "include_telemetry=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Write client_secrets.json
@@ -181,16 +184,28 @@ jobs:
       # overlap both flavors' R8 minify tasks (preview initWith release, shrink on),
       # doubling peak heap and OOMing the runner. Sequential steps peak at one R8.
       - name: Build app (mtl)
-        run: ./gradlew assembleMtlPreview -Pinclude-telemetry -Penable-updater --build-cache --max-workers=4
+        run: |
+          gradle_args=(-Penable-updater --build-cache --max-workers=4)
+          if [ "$INCLUDE_TELEMETRY" = "true" ]; then
+            gradle_args+=(-Pinclude-telemetry)
+          fi
+          ./gradlew assembleMtlPreview "${gradle_args[@]}"
         env:
+          INCLUDE_TELEMETRY: ${{ steps.google_services.outputs.include_telemetry }}
           CCACHE_DIR: /home/runner/.ccache
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
           JAVA_TOOL_OPTIONS: -Xmx4g
 
       - name: Build app (nomtl)
-        run: ./gradlew assembleNomtlPreview -Pinclude-telemetry -Penable-updater --build-cache --max-workers=4
+        run: |
+          gradle_args=(-Penable-updater --build-cache --max-workers=4)
+          if [ "$INCLUDE_TELEMETRY" = "true" ]; then
+            gradle_args+=(-Pinclude-telemetry)
+          fi
+          ./gradlew assembleNomtlPreview "${gradle_args[@]}"
         env:
+          INCLUDE_TELEMETRY: ${{ steps.google_services.outputs.include_telemetry }}
           CCACHE_DIR: /home/runner/.ccache
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
