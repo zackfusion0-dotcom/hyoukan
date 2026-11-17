@@ -1,0 +1,17 @@
+def arm64Only = System.getenv("CUSTOM_APK_ARM64_ONLY") == "true"
+
+if (arm64Only) {
+    def restrictNativeAbis = { project ->
+        project.extensions.getByName("androidComponents").finalizeDsl { android ->
+            android.defaultConfig.ndk.abiFilters.clear()
+            android.defaultConfig.ndk.abiFilters.add("arm64-v8a")
+            project.logger.lifecycle("${project.path}: restricting native ABI to arm64-v8a")
+        }
+    }
+
+    gradle.beforeProject { project ->
+        project.plugins.withId("com.android.library") {
+            restrictNativeAbis(project)
+        }
+    }
+}
